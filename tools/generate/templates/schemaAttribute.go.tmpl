@@ -1,0 +1,15 @@
+{{ define "schema" }}
+"{{ .Name }}": schema.{{ .SchemaType }}{
+  {{ .Scope }}: true,
+  {{- if eq .SchemaType "ListNestedAttribute" "SingleNestedAttribute" }}
+  NestedObject: schema.NestedAttributeObject{
+    Attributes: map[string]schema.Attribute{
+    {{- range $_, $attr := .Attributes }}
+      {{ template "schema" $attr }}
+    {{ end -}}
+    },
+    {{ end -}}
+    },
+  },
+},
+{{ end }}

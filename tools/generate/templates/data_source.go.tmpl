@@ -1,0 +1,92 @@
+{{ define "data_source" }}
+package {{ .PackageName }}
+
+import (
+  "context"
+  "fmt"
+
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/FreekingDean/proxmox-api-go/proxmox"
+	"github.com/FreekingDean/proxmox-api-go/proxmox{{ .ImportPath }}"
+
+  {{ if true -}}
+
+  "github.com/freekingdean/terraform-provider-proxmox/internal/utils"
+  {{ end -}}
+)
+
+var (
+	_ datasource.DataSource = &{{ .PackageName }}DataSource{}
+)
+
+type {{ .PackageName}}Model struct {
+	{{- range $name, $attr := .Attributes }}
+	{{ $name }} types.{{ $attr.TfType }}Type `json:"{{ $attr.JsonName }}"`
+	{{ end -}}
+}
+
+type {{ .Model.Camel }}DataSource struct {
+  client *{{ .Package.Name }}.Client
+}
+
+func New{{ .Model.CamelCap }}DataSource(c *proxmox.Client) func() datasource.DataSource {
+  ds := &{{ .Model.Camel }}DataSource{
+    client: {{ .Package.Name }}.New(c),
+  }
+  return func() datasource.DataSource {
+    return ds
+  }
+}
+
+func (d *{{ .Model.Camel }}DataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_{{ .Model.Snake }}"
+}
+
+func (d *{{ .Model.Camel }}DataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	// Schema defines the schema for the data source.
+	resp.Schema = schema.Schema{
+		Attributes: map[string]schema.Attribute{
+      {{ template "schema" }}
+			"{{ .Plural }}": schema.ListNestedAttribute{
+				Computed: true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+					},
+				},
+			},
+		},
+	}
+}
+
+func (d *{{ .Model.Camel }}DataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var state {{ .Model.Camel }}Model
+  {{- if .HasParameters }}
+	diags := req.Config.Get(ctx, &state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+  {{ end }}
+  resp, err := d.client.Index(ctx)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Unable to Read Proxmox {{ .Model.CamelCap }}",
+			err.Error(),
+		)
+		return
+	}
+
+  {{ template "resourceAttributes" .ResponseAttributes }}
+
+		state.Items = append(state.Aliases, aliasState)
+	}
+
+	diags := resp.State.Set(ctx, &state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+}
+{{ end }}
