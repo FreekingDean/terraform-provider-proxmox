@@ -12,10 +12,10 @@ provider "proxmox" {
   #password = "somepass"
 }
 
-data "proxmox_access_role" "firewall" {
-  roleid = "PVEDatastoreAdmin"
-}
-
-output "value" {
-  value = data.proxmox_access_role.firewall
+resource "proxmox_node_storage_content" "iso" {
+  filename = "k3os-old.iso"
+  storage  = "ds9/local"
+  iso = {
+    url = "https://github.com/rancher/k3os/releases/download/v0.22.2-k3s2r0/k3os-amd64.iso"
+  }
 }

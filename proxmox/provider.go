@@ -18,8 +18,6 @@ import (
 // Ensure the implementation satisfies the expected interfaces
 var (
 	_ provider.Provider = &proxmoxProvider{}
-
-	datasources = make([]func() datasource.DataSource, 0)
 )
 
 // New is a helper function to simplify provider server and testing implementation.
@@ -28,7 +26,9 @@ func New() provider.Provider {
 }
 
 // proxmoxProvider is the provider implementation.
-type proxmoxProvider struct{}
+type proxmoxProvider struct {
+	client *proxmox.Client
+}
 
 // Metadata returns the provider type name.
 func (p *proxmoxProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -133,6 +133,8 @@ func (p *proxmoxProvider) Configure(ctx context.Context, req provider.ConfigureR
 	}
 
 	client.SetCookie(*ticket.Ticket)
+	client.SetCsrf(*ticket.Csrfpreventiontoken)
+	p.client = client
 
 	// Make the Proxmox client available during DataSource and Resource
 	// type Configure methods.
@@ -142,10 +144,24 @@ func (p *proxmoxProvider) Configure(ctx context.Context, req provider.ConfigureR
 
 // DataSources defines the data sources implemented in the provider.
 func (p *proxmoxProvider) DataSources(_ context.Context) []func() datasource.DataSource {
-	return datasources
+	return []func() datasource.DataSource{}
 }
 
 // Resources defines the resources implemented in the provider.
 func (p *proxmoxProvider) Resources(_ context.Context) []func() resource.Resource {
-	return nil
+	return []func() resource.Resource{
+		p.resourceFunc(&resourceNodeStorageContent{}),
+	}
+}
+
+type clientResource interface {
+	resource.Resource
+	SetClient(c *proxmox.Client)
+}
+
+func (p *proxmoxProvider) resourceFunc(r clientResource) func() resource.Resource {
+	return func() resource.Resource {
+		r.SetClient(p.client)
+		return r
+	}
 }
