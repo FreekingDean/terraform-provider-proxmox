@@ -438,7 +438,7 @@ func (r *resourceNodeVirtualMachine) Read(ctx context.Context, req resource.Read
 func buildDisk(i int, file string, sizeStr *string) (*Disk, diag.Diagnostics) {
 	diags := diag.Diagnostics{}
 	storageID := strings.Split(file, ":")[0]
-	var size int
+	var size int64
 	if sizeStr != nil {
 		var err error
 		size, err = strToGB(*sizeStr)
@@ -456,6 +456,6 @@ func buildDisk(i int, file string, sizeStr *string) (*Disk, diag.Diagnostics) {
 	return &Disk{
 		NodeStorage: types.StringValue(storageID),
 		Content:     types.StringValue(file),
-		SizeGB:      types.Int64Value(int64(size)),
+		SizeGB:      types.Int64Value(size),
 	}, diags
 }
