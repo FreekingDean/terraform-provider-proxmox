@@ -1,4 +1,6 @@
-# Terraform Provider Hashicups
+# Terraform Provider Proxmox
+
+[![Release](https://github.com/FreekingDean/terraform-provider-proxmox/actions/workflows/release.yml/badge.svg)](https://github.com/FreekingDean/terraform-provider-proxmox/actions/workflows/release.yml)
 
 This repo is a companion repo to the [Call APIs with Terraform Providers](https://learn.hashicorp.com/collections/terraform/providers) Learn collection. 
 
