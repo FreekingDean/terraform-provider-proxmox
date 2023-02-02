@@ -118,7 +118,7 @@ func (p *proxmoxProvider) Configure(ctx context.Context, req provider.ConfigureR
 	client := proxmox.NewClient(host)
 
 	a := access.New(client)
-	ticket, err := a.CreateTicket(ctx, &access.CreateTicketRequest{
+	ticket, err := a.CreateTicket(ctx, access.CreateTicketRequest{
 		Username: username,
 		Password: password,
 	})
@@ -144,13 +144,16 @@ func (p *proxmoxProvider) Configure(ctx context.Context, req provider.ConfigureR
 
 // DataSources defines the data sources implemented in the provider.
 func (p *proxmoxProvider) DataSources(_ context.Context) []func() datasource.DataSource {
-	return []func() datasource.DataSource{}
+	return []func() datasource.DataSource{
+		p.dataFunc(&dataNode{}),
+	}
 }
 
 // Resources defines the resources implemented in the provider.
 func (p *proxmoxProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		p.resourceFunc(&resourceNodeStorageContent{}),
+		p.resourceFunc(&resourceNodeVirtualMachine{}),
 	}
 }
 
@@ -163,5 +166,17 @@ func (p *proxmoxProvider) resourceFunc(r clientResource) func() resource.Resourc
 	return func() resource.Resource {
 		r.SetClient(p.client)
 		return r
+	}
+}
+
+type clientDataSource interface {
+	datasource.DataSource
+	SetClient(c *proxmox.Client)
+}
+
+func (p *proxmoxProvider) dataFunc(d clientDataSource) func() datasource.DataSource {
+	return func() datasource.DataSource {
+		d.SetClient(p.client)
+		return d
 	}
 }
