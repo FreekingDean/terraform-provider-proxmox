@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/FreekingDean/proxmox-api-go/proxmox"
 	"github.com/FreekingDean/proxmox-api-go/proxmox/nodes/qemu"
+	"github.com/FreekingDean/proxmox-api-go/proxmox/nodes/qemu/status"
 
 	"github.com/FreekingDean/terraform-provider-proxmox/internal/tasks"
 )
@@ -29,33 +31,39 @@ type Disk struct {
 	NodeStorage types.String `tfsdk:"node_storage"`
 	SizeGB      types.Int64  `tfsdk:"size_gb"`
 	Content     types.String `tfsdk:"content"`
+	ImportFrom  types.String `tfsdk:"import_from"`
+	Readonly    types.Bool   `tfsdk:"readonly"`
 }
 
 type Network struct {
-	Bridge     types.String `tfsdk:"bridge"`
-	Firewall   types.Bool   `tfsdk:"firewall"`
-	MacAddress types.String `tfsdk:"mac_address"`
+	Bridge   types.String `tfsdk:"bridge"`
+	Firewall types.Bool   `tfsdk:"firewall"`
 }
 
 type resourceNodeVirtualMachineModel struct {
 	ID       types.Int64  `tfsdk:"id"`
+	Reboot   types.Bool   `tfsdk:"reboot"`
+	FWConfig types.String `tfsdk:"fw_config"`
 	Node     types.String `tfsdk:"node"`
 	Ides     []*Disk      `tfsdk:"ide"`
 	Scsis    []*Disk      `tfsdk:"scsi"`
 	Networks []*Network   `tfsdk:"network"`
 	//Disks []*Disk      `tfsdk:"storage"`
-	Memory types.Int64 `tfsdk:"memory"`
-	CPUs   types.Int64 `tfsdk:"cpus"`
+	Memory  types.Int64    `tfsdk:"memory"`
+	CPUs    types.Int64    `tfsdk:"cpus"`
+	Serials []types.String `tfsdk:"serial"`
 }
 
 type resourceNodeVirtualMachine struct {
 	t *tasks.Client
 	q *qemu.Client
+	c *status.Client
 }
 
 func (r *resourceNodeVirtualMachine) SetClient(p *proxmox.Client) {
 	r.t = tasks.New(p)
 	r.q = qemu.New(p)
+	r.c = status.New(p)
 }
 
 func (r *resourceNodeVirtualMachine) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -63,74 +71,131 @@ func (r *resourceNodeVirtualMachine) Metadata(ctx context.Context, req resource.
 }
 
 func (e *resourceNodeVirtualMachine) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
-	diskBlock := schema.ListNestedBlock{
-		NestedObject: schema.NestedBlockObject{
-			Attributes: map[string]schema.Attribute{
-				"content": schema.StringAttribute{
-					Optional: true,
-					Computed: true,
-					PlanModifiers: []planmodifier.String{
-						stringplanmodifier.UseStateForUnknown(),
+	diskBlock := func(format string) schema.ListNestedBlock {
+		return schema.ListNestedBlock{
+			Description: fmt.Sprintf("A %s disk object", format),
+			NestedObject: schema.NestedBlockObject{
+				Attributes: map[string]schema.Attribute{
+					// TODO: volid
+					"content": schema.StringAttribute{
+						Optional:    true,
+						Computed:    true,
+						Description: "The content ID for this disk",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
+						},
 					},
-				},
-				"size_gb": schema.Int64Attribute{
-					Optional: true,
-					Computed: true,
-					PlanModifiers: []planmodifier.Int64{
-						int64planmodifier.UseStateForUnknown(),
+					"size_gb": schema.Int64Attribute{
+						Optional:    true,
+						Description: "The size in GB if creating a disk",
+						PlanModifiers: []planmodifier.Int64{
+							int64planmodifier.UseStateForUnknown(),
+						},
 					},
-				},
-				"node_storage": schema.StringAttribute{
-					Optional: true,
-					Computed: true,
-					PlanModifiers: []planmodifier.String{
-						stringplanmodifier.UseStateForUnknown(),
+					// TODO: Just storage, node implied?
+					"node_storage": schema.StringAttribute{
+						Optional:    true,
+						Description: "The node storage ID to place the new disk",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
+						},
+					},
+					"import_from": schema.StringAttribute{
+						Optional:    true,
+						Description: "A volid of an existing disk to copy from",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
+						},
+					},
+					"readonly": schema.BoolAttribute{
+						Optional:    true,
+						Description: "If set will put the disk in 'snapshot' mode making it readonly",
+						PlanModifiers: []planmodifier.Bool{
+							boolplanmodifier.UseStateForUnknown(),
+						},
 					},
 				},
 			},
-		},
+		}
 	}
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
 			"id": schema.Int64Attribute{
-				Required: true,
+				Required:    true,
+				Description: "The vmid of the VM",
 				PlanModifiers: []planmodifier.Int64{
 					int64planmodifier.RequiresReplace(),
 				},
 			},
 			"memory": schema.Int64Attribute{
-				Required: true,
+				Required:    true,
+				Description: "Memory allocation in MB",
 			},
 			"cpus": schema.Int64Attribute{
-				Required: true,
+				Required:    true,
+				Description: "The number of cpus/cores to allocate",
 			},
 			"node": schema.StringAttribute{
-				Required: true,
+				Required:    true,
+				Description: "The name of the node to schedule the VM onto",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
+			"fw_config": schema.StringAttribute{
+				Optional:    true,
+				Description: "Additional arguments to pass to qemu",
+			},
+			"reboot": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Reboot on config change",
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"serial": schema.ListAttribute{
+				ElementType: types.StringType,
+				Optional:    true,
+				Description: "A list (max 3) of serial devices on the guest",
+			},
 		},
 		Blocks: map[string]schema.Block{
-			"ide":  diskBlock,
-			"scsi": diskBlock,
+			"ide":  diskBlock("ide"),
+			"scsi": diskBlock("scsi"),
 			"network": schema.ListNestedBlock{
+				Description: "A network interface",
 				NestedObject: schema.NestedBlockObject{
 					Attributes: map[string]schema.Attribute{
 						"bridge": schema.StringAttribute{
-							Required: true,
+							Required:    true,
+							Description: "The hosts network bridge to use",
 						},
 						"firewall": schema.BoolAttribute{
-							Required: true,
-						},
-						"mac_address": schema.StringAttribute{
-							Computed: true,
+							Required:    true,
+							Description: "If set will utilize the proxmox firewall",
 						},
 					},
 				},
 			},
 		},
 	}
+}
+
+func proxmoxDisk(d *Disk, qd wrappedDisk) {
+	if d.Content.ValueString() != "" {
+		qd.SetFile(d.Content.ValueString())
+		if filepath.Ext(d.Content.ValueString()) == ".iso" {
+			qd.SetMedia(string(qemu.IdeMedia_CDROM))
+		}
+	} else if d.NodeStorage.ValueString() != "" {
+		qd.SetFile(fmt.Sprintf("%s:%d", d.NodeStorage.ValueString(), d.SizeGB.ValueInt64()))
+	} else if d.ImportFrom.ValueString() != "" {
+		qd.SetFile(d.NodeStorage.ValueString() + ":0")
+		qd.SetImportFrom(d.ImportFrom.ValueString())
+		qd.UnSetMedia()
+	}
+
+	qd.SetSnapshot(d.Readonly.ValueBool())
 }
 
 func (r *resourceNodeVirtualMachine) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -152,33 +217,35 @@ func (r *resourceNodeVirtualMachine) Create(ctx context.Context, req resource.Cr
 	ideArr := make(qemu.Ides, 0)
 	scsiArr := make(qemu.Scsis, 0)
 
+	if plan.FWConfig.ValueString() != "" {
+		cfgString := "-fw_cfg " + plan.FWConfig.ValueString()
+		creq.Args = &cfgString
+	}
+	nets := make(qemu.Nets, len(plan.Networks))
+	for i, net := range plan.Networks {
+		n := &qemu.Net{
+			Firewall: proxmox.PVEBool(net.Firewall.ValueBool()),
+			Bridge:   proxmox.String(net.Bridge.ValueString()),
+			Model:    qemu.NetModel_VIRTIO,
+		}
+		nets[i] = n
+	}
+	creq.Nets = &nets
+
 	for _, d := range plan.Ides {
 		ide := &qemu.Ide{}
-		if !d.Content.IsNull() {
-			ide.File = d.Content.ValueString()
-			if filepath.Ext(d.Content.ValueString()) == ".iso" {
-				ide.Media = qemu.PtrIdeMedia(qemu.IdeMedia_CDROM)
-			}
-		} else if !d.NodeStorage.IsNull() {
-			ide.File = fmt.Sprintf("%s:%d", d.NodeStorage.ValueString(), d.SizeGB.ValueInt64())
-		}
+		proxmoxDisk(d, (*wrappedIde)(ide))
 		ideArr = append(ideArr, ide)
 	}
 
 	for _, d := range plan.Scsis {
 		scsi := &qemu.Scsi{}
-		if !d.Content.IsNull() {
-			scsi.File = d.Content.ValueString()
-			if filepath.Ext(d.Content.ValueString()) == ".iso" {
-				scsi.Media = qemu.PtrScsiMedia(qemu.ScsiMedia_CDROM)
-			}
-		} else if !d.NodeStorage.IsNull() {
-			scsi.File = fmt.Sprintf("%s:%d", d.NodeStorage.ValueString(), d.SizeGB.ValueInt64())
-		}
+		proxmoxDisk(d, (*wrappedScsi)(scsi))
 		scsiArr = append(scsiArr, scsi)
 	}
 	creq.Ides = &ideArr
 	creq.Scsis = &scsiArr
+
 	task, err := r.q.Create(ctx, creq)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -218,10 +285,10 @@ func (r *resourceNodeVirtualMachine) Delete(ctx context.Context, req resource.De
 		Vmid:  int(data.ID.ValueInt64()),
 		Purge: proxmox.PVEBool(true),
 	})
-	if err.Error() == fmt.Sprintf("non 200: 500 Configuration file 'nodes/%s/qemu-server/%d.conf' does not exist", data.Node.ValueString(), data.ID.ValueInt64()) {
-		return
-	}
 	if err != nil {
+		if err.Error() == fmt.Sprintf("non 200: 500 Configuration file 'nodes/%s/qemu-server/%d.conf' does not exist", data.Node.ValueString(), data.ID.ValueInt64()) {
+			return
+		}
 		resp.Diagnostics.AddError(
 			"Error deleting VM",
 			"An unexpected error occurred when deleting the VM. "+
@@ -254,35 +321,21 @@ func (r *resourceNodeVirtualMachine) Update(ctx context.Context, req resource.Up
 	}
 	configReq.Memory = proxmox.Int(int(plan.Memory.ValueInt64()))
 	configReq.Cores = proxmox.Int(int(plan.CPUs.ValueInt64()))
+	if plan.FWConfig.ValueString() != "" {
+		cfgString := "-fw_cfg " + plan.FWConfig.ValueString()
+		configReq.Args = &cfgString
+	}
 	ideArr := make(qemu.Ides, len(plan.Ides))
 	for i, d := range plan.Ides {
 		ide := &qemu.Ide{}
-		if !d.Content.IsNull() {
-			ide.File = d.Content.ValueString()
-			if filepath.Ext(d.Content.ValueString()) == ".iso" {
-				ide.Media = qemu.PtrIdeMedia(qemu.IdeMedia_CDROM)
-			}
-			plan.Ides[i].SizeGB = types.Int64Value(0)
-			plan.Ides[i].NodeStorage = types.StringValue(
-				strings.Split(d.Content.ValueString(), ":")[0],
-			)
-		} else if !d.NodeStorage.IsNull() {
-			ide.File = fmt.Sprintf("%s:%d", d.NodeStorage.ValueString(), d.SizeGB.ValueInt64())
-		}
+		proxmoxDisk(d, (*wrappedIde)(ide))
 		ideArr[i] = ide
 	}
 
 	scsiArr := make(qemu.Scsis, len(plan.Scsis))
 	for i, d := range plan.Scsis {
 		scsi := &qemu.Scsi{}
-		if !d.Content.IsNull() {
-			scsi.File = d.Content.ValueString()
-			if filepath.Ext(d.Content.ValueString()) == ".iso" {
-				scsi.Media = qemu.PtrScsiMedia(qemu.ScsiMedia_CDROM)
-			}
-		} else if !d.NodeStorage.IsNull() {
-			scsi.File = fmt.Sprintf("%s:%d", d.NodeStorage.ValueString(), d.SizeGB.ValueInt64())
-		}
+		proxmoxDisk(d, (*wrappedScsi)(scsi))
 		scsiArr[i] = scsi
 	}
 	configReq.Ides = &ideArr
@@ -294,21 +347,6 @@ func (r *resourceNodeVirtualMachine) Update(ctx context.Context, req resource.Up
 			Firewall: proxmox.PVEBool(net.Firewall.ValueBool()),
 			Bridge:   proxmox.String(net.Bridge.ValueString()),
 			Model:    qemu.NetModel_VIRTIO,
-		}
-		if net.MacAddress.IsNull() || net.MacAddress.ValueString() == "" {
-			mac, err := generateMac()
-			if err != nil {
-				resp.Diagnostics.AddError(
-					"Error generating mac",
-					"An unexpected error occurred when generating a mac address. "+
-						"generateMac Error: "+err.Error(),
-				)
-				return
-			}
-			n.Macaddr = proxmox.String(mac.String())
-			net.MacAddress = types.StringValue(mac.String())
-		} else {
-			n.Macaddr = proxmox.String(net.MacAddress.ValueString())
 		}
 		nets[i] = n
 	}
@@ -333,6 +371,52 @@ func (r *resourceNodeVirtualMachine) Update(ctx context.Context, req resource.Up
 		)
 		return
 	}
+	if plan.Reboot.ValueBool() {
+		task, err = r.c.VmStop(ctx, status.VmStopRequest{
+			Node:    plan.Node.ValueString(),
+			Vmid:    int(plan.ID.ValueInt64()),
+			Timeout: proxmox.Int(300),
+		})
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error rebooting VM",
+				"An unexpected error occurred when rebooting the VM. "+
+					"Proxmox API Error: "+err.Error(),
+			)
+			return
+		}
+		err = r.t.Wait(ctx, task, plan.Node.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error waiting for VM to be created",
+				"An unexpected error occurred when waiting for the VM. "+
+					"Proxmox Task Error: "+err.Error(),
+			)
+			return
+		}
+		task, err = r.c.VmStart(ctx, status.VmStartRequest{
+			Node:    plan.Node.ValueString(),
+			Vmid:    int(plan.ID.ValueInt64()),
+			Timeout: proxmox.Int(300),
+		})
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error rebooting VM",
+				"An unexpected error occurred when rebooting the VM. "+
+					"Proxmox API Error: "+err.Error(),
+			)
+			return
+		}
+		err = r.t.Wait(ctx, task, plan.Node.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error waiting for VM to be created",
+				"An unexpected error occurred when waiting for the VM. "+
+					"Proxmox Task Error: "+err.Error(),
+			)
+			return
+		}
+	}
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -353,6 +437,9 @@ func (r *resourceNodeVirtualMachine) Read(ctx context.Context, req resource.Read
 		Vmid: int(state.ID.ValueInt64()),
 	})
 	if err != nil {
+		if err.Error() == fmt.Sprintf("non 200: 500 Configuration file 'nodes/%s/qemu-server/%d.conf' does not exist", state.Node.ValueString(), state.ID.ValueInt64()) {
+			return
+		}
 		resp.Diagnostics.AddError(
 			"Error gettng  VM config",
 			"An unexpected error occurred when retreiving the VM config. "+
@@ -369,30 +456,38 @@ func (r *resourceNodeVirtualMachine) Read(ctx context.Context, req resource.Read
 	}
 	state.Memory = types.Int64Value(int64(*config.Memory))
 	state.CPUs = types.Int64Value(int64(*config.Cores))
-	state.Ides = make([]*Disk, 0)
+	if state.Ides == nil {
+		state.Ides = make([]*Disk, 0)
+	}
 	if config.Ides != nil {
 		for i, ide := range *config.Ides {
+			if len(state.Ides) <= i {
+				state.Ides = append(state.Ides, &Disk{})
+			}
 			if ide == nil {
-				state.Ides = append(state.Ides, nil)
+				state.Ides[i] = nil
 				continue
 			}
-			disk, diags := buildDisk(i, ide.File, ide.Size)
+			diags := state.Ides[i].buildDisk(i, ide.File, (*bool)(ide.Snapshot))
 			resp.Diagnostics.Append(diags...)
 			if resp.Diagnostics.HasError() {
 				return
 			}
-			state.Ides = append(state.Ides, disk)
 		}
 	}
-	state.Scsis = make([]*Disk, 0)
+	if state.Scsis == nil {
+		state.Scsis = make([]*Disk, 0)
+	}
 	if config.Scsis != nil {
 		for i, scsi := range *config.Scsis {
-			disk, diags := buildDisk(i, scsi.File, scsi.Size)
+			if len(state.Scsis) <= i {
+				state.Scsis = append(state.Scsis, &Disk{})
+			}
+			diags := state.Scsis[i].buildDisk(i, scsi.File, (*bool)(scsi.Snapshot))
 			resp.Diagnostics.Append(diags...)
 			if resp.Diagnostics.HasError() {
 				return
 			}
-			state.Scsis = append(state.Scsis, disk)
 		}
 	}
 
@@ -402,9 +497,6 @@ func (r *resourceNodeVirtualMachine) Read(ctx context.Context, req resource.Read
 			n := &Network{}
 			if net.Firewall != nil {
 				n.Firewall = types.BoolValue(bool(*net.Firewall))
-			}
-			if net.Macaddr != nil {
-				n.MacAddress = types.StringValue(*net.Macaddr)
 			}
 			if net.Bridge != nil {
 				n.Bridge = types.StringValue(*net.Bridge)
@@ -435,27 +527,15 @@ func (r *resourceNodeVirtualMachine) Read(ctx context.Context, req resource.Read
 //	}
 //}
 
-func buildDisk(i int, file string, sizeStr *string) (*Disk, diag.Diagnostics) {
+func (d *Disk) buildDisk(i int, file string, snapshot *bool) diag.Diagnostics {
 	diags := diag.Diagnostics{}
 	storageID := strings.Split(file, ":")[0]
-	var size int64
-	if sizeStr != nil {
-		var err error
-		size, err = strToGB(*sizeStr)
-		if err != nil {
-			diags.AddError(
-				"Error converting size",
-				fmt.Sprintf(
-					"An unexpected error occurred when converting disk(ide%d) size(%s). ",
-					i, *sizeStr,
-				)+"Proxmox API Error: "+err.Error(),
-			)
-			return nil, diags
-		}
+	snapshotBool := false
+	if snapshot != nil {
+		snapshotBool = *snapshot
 	}
-	return &Disk{
-		NodeStorage: types.StringValue(storageID),
-		Content:     types.StringValue(file),
-		SizeGB:      types.Int64Value(size),
-	}, diags
+	d.NodeStorage = types.StringValue(storageID)
+	d.Content = types.StringValue(file)
+	d.Readonly = types.BoolValue(snapshotBool)
+	return diags
 }

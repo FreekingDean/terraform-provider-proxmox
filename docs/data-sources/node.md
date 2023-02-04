@@ -3,12 +3,12 @@
 page_title: "proxmox_node Data Source - proxmox"
 subcategory: ""
 description: |-
-  
+  A proxmox node
 ---
 
 # proxmox_node (Data Source)
 
-
+A proxmox node
 
 
 
@@ -17,10 +17,10 @@ description: |-
 
 ### Required
 
-- `name` (String)
+- `name` (String) The name of the node
 
 ### Read-Only
 
-- `ip_address` (String)
+- `ip_address` (String) The first available connectable IP Address
 
 

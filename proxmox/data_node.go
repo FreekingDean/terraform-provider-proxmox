@@ -32,12 +32,16 @@ func (d *dataNode) Metadata(_ context.Context, req datasource.MetadataRequest, r
 // Schema defines the schema for the data source.
 func (d *dataNode) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "A proxmox node",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
-				Required: true,
+				Required:    true,
+				Description: "The name of the node",
 			},
+			//TODO: Make this load all networks
 			"ip_address": schema.StringAttribute{
-				Computed: true,
+				Computed:    true,
+				Description: "The first available connectable IP Address",
 			},
 		},
 	}

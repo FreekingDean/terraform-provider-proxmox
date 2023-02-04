@@ -50,18 +50,23 @@ func (r *resourceNodeStorageContent) Metadata(ctx context.Context, req resource.
 
 func (e *resourceNodeStorageContent) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "Storage content aka a volume",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Computed: true,
+				Description: "The volid of the content",
+				Computed:    true,
 			},
 			"filename": schema.StringAttribute{
-				Required: true,
+				Required:    true,
+				Description: "The filename on the storage",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
+			// DG AIP?: /nodes/{node_id}/storage/{storage_id} ??
 			"storage": schema.StringAttribute{
-				Required: true,
+				Required:    true,
+				Description: "The storage identifier",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -69,18 +74,22 @@ func (e *resourceNodeStorageContent) Schema(ctx context.Context, req resource.Sc
 		},
 		Blocks: map[string]schema.Block{
 			"iso": schema.SingleNestedBlock{
+				Description: "An iso object",
 				Attributes: map[string]schema.Attribute{
 					"url": schema.StringAttribute{
-						Required: true,
+						Required:    true,
+						Description: "The url to download the iso from",
 						PlanModifiers: []planmodifier.String{
 							stringplanmodifier.RequiresReplace(),
 						},
 					},
 					"checksum": schema.StringAttribute{
-						Optional: true,
+						Optional:    true,
+						Description: "A checksum of the downlaoded content",
 					},
 					"checksum_algorithm": schema.StringAttribute{
-						Optional: true,
+						Optional:    true,
+						Description: "The checksum algorithm of the downlaoded content",
 					},
 				},
 			},

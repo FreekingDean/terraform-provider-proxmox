@@ -38,16 +38,20 @@ func (p *proxmoxProvider) Metadata(_ context.Context, _ provider.MetadataRequest
 // Schema defines the provider-level schema for configuration data.
 func (p *proxmoxProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "Connect to proxmox",
 		Attributes: map[string]schema.Attribute{
 			"host": schema.StringAttribute{
-				Optional: true,
+				Optional:    true,
+				Description: "The hostname of a node you want to connect to",
 			},
 			"username": schema.StringAttribute{
-				Optional: true,
+				Optional:    true,
+				Description: "The username of the user attempting to connect. (i.e. root@pve if using PAM authentication)",
 			},
 			"password": schema.StringAttribute{
-				Optional:  true,
-				Sensitive: true,
+				Optional:    true,
+				Sensitive:   true,
+				Description: "The password of the user attempting to connect.",
 			},
 		},
 	}

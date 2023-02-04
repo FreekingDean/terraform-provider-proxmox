@@ -3,12 +3,12 @@
 page_title: "proxmox Provider"
 subcategory: ""
 description: |-
-  
+  Connect to proxmox
 ---
 
 # proxmox Provider
 
-
+Connect to proxmox
 
 ## Example Usage
 
@@ -40,6 +40,6 @@ provider "proxmox" {
 
 ### Optional
 
-- `host` (String)
-- `password` (String, Sensitive)
-- `username` (String)
+- `host` (String) The hostname of a node you want to connect to
+- `password` (String, Sensitive) The password of the user attempting to connect.
+- `username` (String) The username of the user attempting to connect. (i.e. root@pve if using PAM authentication)
