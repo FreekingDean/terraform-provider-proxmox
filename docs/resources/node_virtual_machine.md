@@ -58,7 +58,7 @@ resource "proxmox_node_virtual_machine" "ubuntu" {
 - `network` (Block List) A network interface (see [below for nested schema](#nestedblock--network))
 - `reboot` (Boolean) Reboot on config change
 - `scsi` (Block List) A scsi disk object (see [below for nested schema](#nestedblock--scsi))
-- `serial` (List of String) A list (max 3) of serial devices on the guest
+- `serials` (List of String) A list (max 3) of serial devices on the guest
 
 <a id="nestedblock--ide"></a>
 ### Nested Schema for `ide`
@@ -66,10 +66,15 @@ resource "proxmox_node_virtual_machine" "ubuntu" {
 Optional:
 
 - `content` (String) The content ID for this disk
+- `id` (Number) The disk ID for this disk (i.e. ide0 would just be 0)
 - `import_from` (String) A volid of an existing disk to copy from
-- `node_storage` (String) The node storage ID to place the new disk
 - `readonly` (Boolean) If set will put the disk in 'snapshot' mode making it readonly
 - `size_gb` (Number) The size in GB if creating a disk
+- `storage` (String) The node storage ID to place the new disk
+
+Read-Only:
+
+- `volume_id` (String) The volume ID for this disk
 
 
 <a id="nestedblock--network"></a>
@@ -80,6 +85,10 @@ Required:
 - `bridge` (String) The hosts network bridge to use
 - `firewall` (Boolean) If set will utilize the proxmox firewall
 
+Optional:
+
+- `id` (Number) The network id (i.e. net0 would be 0)
+
 
 <a id="nestedblock--scsi"></a>
 ### Nested Schema for `scsi`
@@ -87,10 +96,15 @@ Required:
 Optional:
 
 - `content` (String) The content ID for this disk
+- `id` (Number) The disk ID for this disk (i.e. scsi0 would just be 0)
 - `import_from` (String) A volid of an existing disk to copy from
-- `node_storage` (String) The node storage ID to place the new disk
 - `readonly` (Boolean) If set will put the disk in 'snapshot' mode making it readonly
 - `size_gb` (Number) The size in GB if creating a disk
+- `storage` (String) The node storage ID to place the new disk
+
+Read-Only:
+
+- `volume_id` (String) The volume ID for this disk
 
 ## Import
 

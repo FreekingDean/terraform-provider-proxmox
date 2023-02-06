@@ -141,13 +141,8 @@ func (r *resourceNodeStorageContent) Create(ctx context.Context, req resource.Cr
 			)
 			return
 		}
-		err = r.t.Wait(ctx, outStr, id.Node)
-		if err != nil {
-			resp.Diagnostics.AddError(
-				"Error downloading iso",
-				"An unexpected error occurred when downloading ISO. "+
-					"Proxmox Task Error: "+err.Error(),
-			)
+		resp.Diagnostics.Append(r.t.Wait(ctx, outStr, id.Node)...)
+		if resp.Diagnostics.HasError() {
 			return
 		}
 	}
@@ -192,13 +187,8 @@ func (r *resourceNodeStorageContent) Delete(ctx context.Context, req resource.De
 		)
 		return
 	}
-	err = r.t.Wait(ctx, taskID, id.Node)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error deleting content",
-			"An unexpected error occurred when deleting content. "+
-				"Proxmox Task Error: "+err.Error(),
-		)
+	resp.Diagnostics.Append(r.t.Wait(ctx, taskID, id.Node)...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 }

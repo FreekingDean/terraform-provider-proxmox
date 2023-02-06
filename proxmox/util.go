@@ -1,9 +1,7 @@
 package proxmox
 
 import (
-	"crypto/rand"
 	"fmt"
-	"net"
 	"strconv"
 )
 
@@ -38,18 +36,4 @@ func strToGB(in string) (int64, error) {
 	}
 	size = size * sizeMap[denom]
 	return size / G, nil
-}
-
-func generateMac() (net.HardwareAddr, error) {
-	buf := make([]byte, 6)
-	var mac net.HardwareAddr
-	_, err := rand.Read(buf)
-	if err != nil {
-		return nil, err
-	}
-	// Unset the local bit
-	buf[0] <<= 1
-
-	mac = append(mac, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5])
-	return mac, nil
 }

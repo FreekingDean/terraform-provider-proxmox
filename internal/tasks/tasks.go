@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/FreekingDean/proxmox-api-go/proxmox/nodes/tasks"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 )
 
 type Client struct {
@@ -17,7 +18,8 @@ func New(p tasks.HTTPClient) *Client {
 	}
 }
 
-func (t *Client) Wait(ctx context.Context, upid string, node string) error {
+func (t *Client) Wait(ctx context.Context, upid string, node string) diag.Diagnostics {
+	diag := diag.Diagnostics{}
 	req := tasks.ReadTaskStatusRequest{
 		Node: node,
 		Upid: upid,
@@ -26,7 +28,12 @@ func (t *Client) Wait(ctx context.Context, upid string, node string) error {
 	for {
 		resp, err := t.c.ReadTaskStatus(ctx, req)
 		if err != nil {
-			return err
+			diag.AddError(
+				fmt.Sprintf("Error waiting for task id %s on %s", upid, node),
+				"An unexpected error occurred when getting the task. "+
+					"Proxmox Task Error: "+err.Error(),
+			)
+			return diag
 		}
 		if resp.Status != "running" {
 			exit = *resp.Exitstatus
@@ -34,7 +41,12 @@ func (t *Client) Wait(ctx context.Context, upid string, node string) error {
 		}
 	}
 	if exit != "OK" {
-		return fmt.Errorf("received bad exit status: %s", exit)
+		diag.AddError(
+			"Error waiting for VM to be created",
+			"An unexpected error occurred when getting the task. "+
+				"Proxmox Task Error: received bad exit status: "+exit,
+		)
+		return diag
 	}
-	return nil
+	return diag
 }

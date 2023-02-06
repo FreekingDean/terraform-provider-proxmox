@@ -3,9 +3,10 @@ module github.com/FreekingDean/terraform-provider-proxmox
 go 1.18
 
 require (
-	github.com/FreekingDean/proxmox-api-go v0.0.21
+	github.com/FreekingDean/proxmox-api-go v0.0.23
 	github.com/hashicorp/terraform-plugin-docs v0.13.0
 	github.com/hashicorp/terraform-plugin-framework v1.0.1
+	github.com/hashicorp/terraform-plugin-framework-validators v0.9.0
 )
 
 require (
