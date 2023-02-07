@@ -66,7 +66,6 @@ resource "proxmox_node_virtual_machine" "ubuntu" {
 Optional:
 
 - `content` (String) The content ID for this disk
-- `id` (Number) The disk ID for this disk (i.e. ide0 would just be 0)
 - `import_from` (String) A volid of an existing disk to copy from
 - `readonly` (Boolean) If set will put the disk in 'snapshot' mode making it readonly
 - `size_gb` (Number) The size in GB if creating a disk
@@ -85,10 +84,6 @@ Required:
 - `bridge` (String) The hosts network bridge to use
 - `firewall` (Boolean) If set will utilize the proxmox firewall
 
-Optional:
-
-- `id` (Number) The network id (i.e. net0 would be 0)
-
 
 <a id="nestedblock--scsi"></a>
 ### Nested Schema for `scsi`
@@ -96,7 +91,6 @@ Optional:
 Optional:
 
 - `content` (String) The content ID for this disk
-- `id` (Number) The disk ID for this disk (i.e. scsi0 would just be 0)
 - `import_from` (String) A volid of an existing disk to copy from
 - `readonly` (Boolean) If set will put the disk in 'snapshot' mode making it readonly
 - `size_gb` (Number) The size in GB if creating a disk

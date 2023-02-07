@@ -24,13 +24,11 @@ import (
 	"github.com/FreekingDean/proxmox-api-go/proxmox/nodes/qemu/status"
 
 	"github.com/FreekingDean/terraform-provider-proxmox/internal/tasks"
-	"github.com/FreekingDean/terraform-provider-proxmox/internal/validators"
 )
 
 // Type scsi,ide
 // Media cdrom,disk
 type Disk struct {
-	ID         types.Int64  `tfsdk:"id"`
 	VolumeID   types.String `tfsdk:"volume_id"`
 	Storage    types.String `tfsdk:"storage"`
 	SizeGB     types.Int64  `tfsdk:"size_gb"`
@@ -40,7 +38,6 @@ type Disk struct {
 }
 
 type Network struct {
-	ID       types.Int64  `tfsdk:"id"`
 	Bridge   types.String `tfsdk:"bridge"`
 	Firewall types.Bool   `tfsdk:"firewall"`
 }
@@ -80,17 +77,12 @@ func (e *resourceNodeVirtualMachine) Schema(ctx context.Context, req resource.Sc
 			Description: fmt.Sprintf("A %s disk object", format),
 			NestedObject: schema.NestedBlockObject{
 				Attributes: map[string]schema.Attribute{
-					"id": schema.Int64Attribute{
-						Optional:    true,
-						Description: fmt.Sprintf("The disk ID for this disk (i.e. %s0 would just be 0)", format),
-						Validators: []validator.Int64{
-							validators.NotEqual(path.MatchRelative().AtParent().AtName("id")),
-							int64validator.Between(min, max),
-						},
-					},
 					"volume_id": schema.StringAttribute{
 						Computed:    true,
 						Description: "The volume ID for this disk",
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
+						},
 					},
 					"content": schema.StringAttribute{
 						Optional:    true,
@@ -183,10 +175,6 @@ func (e *resourceNodeVirtualMachine) Schema(ctx context.Context, req resource.Sc
 				Description: "A network interface",
 				NestedObject: schema.NestedBlockObject{
 					Attributes: map[string]schema.Attribute{
-						"id": schema.Int64Attribute{
-							Optional:    true,
-							Description: "The network id (i.e. net0 would be 0)",
-						},
 						"bridge": schema.StringAttribute{
 							Required:    true,
 							Description: "The hosts network bridge to use",
@@ -232,42 +220,32 @@ func (r *resourceNodeVirtualMachine) Create(ctx context.Context, req resource.Cr
 		creq.Args = &cfgString
 	}
 
-	nets := make(qemu.Nets, 0)
-	for _, net := range plan.Networks {
-		for net.ID.ValueInt64() > int64(len(nets)-1) {
-			nets = append(nets, nil)
-		}
-		n := &qemu.Net{
+	nets := make(qemu.Nets, len(plan.Networks))
+	for i, net := range plan.Networks {
+		nets[i] = &qemu.Net{
 			Firewall: proxmox.PVEBool(net.Firewall.ValueBool()),
 			Bridge:   proxmox.String(net.Bridge.ValueString()),
 			Model:    qemu.NetModel_VIRTIO,
 		}
-		nets[net.ID.ValueInt64()] = n
 	}
 	creq.Nets = &nets
 
 	if len(plan.Ides) > 0 {
-		ideArr := make(qemu.Ides, 0)
-		for _, d := range plan.Ides {
-			for d.ID.ValueInt64() > int64(len(ideArr)-1) {
-				ideArr = append(ideArr, nil)
-			}
+		ideArr := make(qemu.Ides, len(plan.Ides))
+		for i, d := range plan.Ides {
 			ide := &qemu.Ide{}
 			proxmoxDisk(d, (*wrappedIde)(ide))
-			ideArr[d.ID.ValueInt64()] = ide
+			ideArr[i] = ide
 		}
 		creq.Ides = &ideArr
 	}
 
 	if len(plan.Scsis) > 0 {
-		scsiArr := make(qemu.Scsis, 0)
-		for _, d := range plan.Scsis {
-			for d.ID.ValueInt64() > int64(len(scsiArr)-1) {
-				scsiArr = append(scsiArr, nil)
-			}
+		scsiArr := make(qemu.Scsis, len(plan.Scsis))
+		for i, d := range plan.Scsis {
 			scsi := &qemu.Scsi{}
 			proxmoxDisk(d, (*wrappedScsi)(scsi))
-			scsiArr[d.ID.ValueInt64()] = scsi
+			scsiArr[i] = scsi
 		}
 		creq.Scsis = &scsiArr
 	}
@@ -300,25 +278,25 @@ func (r *resourceNodeVirtualMachine) Create(ctx context.Context, req resource.Cr
 		)
 		return
 	}
-	for _, d := range plan.Scsis {
-		if config.Scsis == nil || len(*config.Scsis) <= int(d.ID.ValueInt64()) {
+	for i, d := range plan.Scsis {
+		if config.Scsis == nil || len(*config.Scsis) <= i {
 			resp.Diagnostics.AddError(
 				"Not enough disks",
 				"Something went wrong creating the VM not enough scsi Disks",
 			)
 			return
 		}
-		d.VolumeID = types.StringValue((*config.Scsis)[d.ID.ValueInt64()].File)
+		d.VolumeID = types.StringValue((*config.Scsis)[i].File)
 	}
-	for _, d := range plan.Ides {
-		if config.Ides == nil || len(*config.Ides) <= int(d.ID.ValueInt64()) {
+	for i, d := range plan.Ides {
+		if config.Ides == nil || len(*config.Ides) <= i {
 			resp.Diagnostics.AddError(
 				"Not enough disks",
 				"Something went wrong creating the VM not enough ide Disks",
 			)
 			return
 		}
-		d.VolumeID = types.StringValue((*config.Ides)[d.ID.ValueInt64()].File)
+		d.VolumeID = types.StringValue((*config.Ides)[i].File)
 	}
 
 	diags = resp.State.Set(ctx, plan)
@@ -367,42 +345,90 @@ func (r *resourceNodeVirtualMachine) Update(ctx context.Context, req resource.Up
 		return
 	}
 
+	var state resourceNodeVirtualMachineModel
+	diags = req.State.Get(ctx, &state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	configReq := qemu.UpdateVmAsyncConfigRequest{
 		Node: plan.Node.ValueString(),
 		Vmid: int(plan.ID.ValueInt64()),
 	}
-	configReq.Memory = proxmox.Int(int(plan.Memory.ValueInt64()))
-	configReq.Cores = proxmox.Int(int(plan.CPUs.ValueInt64()))
-	if plan.FWConfig.ValueString() != "" {
-		cfgString := "-fw_cfg " + plan.FWConfig.ValueString()
+
+	if !plan.Memory.Equal(state.Memory) {
+		configReq.Memory = proxmox.Int(int(plan.Memory.ValueInt64()))
+	}
+
+	if !plan.CPUs.Equal(state.CPUs) {
+		configReq.Cores = proxmox.Int(int(plan.CPUs.ValueInt64()))
+	}
+
+	if !plan.FWConfig.Equal(state.FWConfig) {
+		cfgString := ""
+		if plan.FWConfig.ValueString() != "" {
+			cfgString = "-fw_cfg " + plan.FWConfig.ValueString()
+		}
 		configReq.Args = &cfgString
 	}
-	ideArr := make(qemu.Ides, len(plan.Ides))
-	for i, d := range plan.Ides {
-		ide := &qemu.Ide{}
-		proxmoxDisk(d, (*wrappedIde)(ide))
-		ideArr[i] = ide
-	}
 
-	scsiArr := make(qemu.Scsis, len(plan.Scsis))
-	for i, d := range plan.Scsis {
-		scsi := &qemu.Scsi{}
-		proxmoxDisk(d, (*wrappedScsi)(scsi))
-		scsiArr[i] = scsi
-	}
-	configReq.Ides = &ideArr
-	configReq.Scsis = &scsiArr
+	toDel := []string{}
 
-	nets := make(qemu.Nets, len(plan.Networks))
-	for i, net := range plan.Networks {
-		n := &qemu.Net{
-			Firewall: proxmox.PVEBool(net.Firewall.ValueBool()),
-			Bridge:   proxmox.String(net.Bridge.ValueString()),
-			Model:    qemu.NetModel_VIRTIO,
+	if len(plan.Networks) > 0 {
+		nets := make(qemu.Nets, 0)
+		for i, net := range plan.Networks {
+			if len(state.Networks) <= i ||
+				state.Networks[i].Firewall != plan.Networks[i].Firewall ||
+				state.Networks[i].Bridge != plan.Networks[i].Bridge {
+				nets = append(nets, &qemu.Net{
+					Firewall: proxmox.PVEBool(net.Firewall.ValueBool()),
+					Bridge:   proxmox.String(net.Bridge.ValueString()),
+					Model:    qemu.NetModel_VIRTIO,
+				})
+			}
 		}
-		nets[i] = n
+		configReq.Nets = &nets
 	}
-	configReq.Nets = &nets
+	for i := len(plan.Networks); i < len(state.Networks); i++ {
+		toDel = append(toDel, fmt.Sprintf("net%d", i))
+	}
+
+	if len(plan.Ides) > 0 {
+		ideArr := make(qemu.Ides, 0)
+		for i, d := range plan.Ides {
+			if len(state.Ides) < i ||
+				!state.Ides[i].Equal(plan.Ides[i]) {
+				ide := &qemu.Ide{}
+				proxmoxDisk(d, (*wrappedIde)(ide))
+				ideArr = append(ideArr, ide)
+			}
+		}
+		configReq.Ides = &ideArr
+	}
+	for i := len(plan.Ides); i < len(state.Ides); i++ {
+		toDel = append(toDel, fmt.Sprintf("ide%d", i))
+	}
+
+	if len(plan.Scsis) > 0 {
+		scsiArr := make(qemu.Scsis, 0)
+		for i, d := range plan.Scsis {
+			if len(state.Scsis) < i ||
+				!state.Scsis[i].Equal(plan.Scsis[i]) {
+				scsi := &qemu.Scsi{}
+				proxmoxDisk(d, (*wrappedScsi)(scsi))
+				scsiArr = append(scsiArr, scsi)
+			}
+		}
+		configReq.Scsis = &scsiArr
+	}
+	for i := len(plan.Scsis); i < len(state.Scsis); i++ {
+		toDel = append(toDel, fmt.Sprintf("scsi%d", i))
+	}
+
+	if len(toDel) > 0 {
+		configReq.Delete = proxmox.String(strings.Join(toDel, ","))
+	}
 
 	task, err := r.q.UpdateVmAsyncConfig(ctx, configReq)
 	if err != nil {
@@ -446,6 +472,15 @@ func (r *resourceNodeVirtualMachine) Update(ctx context.Context, req resource.Up
 	}
 }
 
+func (d *Disk) Equal(other *Disk) bool {
+	return d.VolumeID.Equal(other.VolumeID) &&
+		d.ImportFrom.Equal(other.ImportFrom) &&
+		d.Storage.Equal(other.Storage) &&
+		d.SizeGB.Equal(other.SizeGB) &&
+		d.Content.Equal(other.Content) &&
+		d.Readonly.Equal(other.Readonly)
+}
+
 func (r *resourceNodeVirtualMachine) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var state resourceNodeVirtualMachineModel
 	diags := req.State.Get(ctx, &state)
@@ -476,19 +511,26 @@ func (r *resourceNodeVirtualMachine) Read(ctx context.Context, req resource.Read
 		)
 		return
 	}
+
 	state.Memory = types.Int64Value(int64(*config.Memory))
 	state.CPUs = types.Int64Value(int64(*config.Cores))
+
+	if config.Args != nil {
+		if strings.HasPrefix(*config.Args, "-fw_cfg") {
+			state.FWConfig = types.StringValue(strings.TrimPrefix(*config.Args, "-fw_cfg"))
+		}
+	}
+
 	if state.Ides == nil {
 		state.Ides = make([]*Disk, 0)
 	}
 	if config.Ides != nil {
 		for i, ide := range *config.Ides {
-			if len(state.Ides) <= i {
-				state.Ides = append(state.Ides, &Disk{})
+			for i >= len(state.Ides) {
+				state.Ides = append(state.Ides, nil)
 			}
-			if ide == nil {
-				state.Ides[i] = nil
-				continue
+			if state.Ides[i] == nil || state.Ides[i].VolumeID.ValueString() != ide.File {
+				state.Ides[i] = &Disk{}
 			}
 			diags := state.Ides[i].buildDisk(i, ide.File, (*bool)(ide.Snapshot))
 			resp.Diagnostics.Append(diags...)
@@ -502,8 +544,11 @@ func (r *resourceNodeVirtualMachine) Read(ctx context.Context, req resource.Read
 	}
 	if config.Scsis != nil {
 		for i, scsi := range *config.Scsis {
-			if len(state.Scsis) <= i {
-				state.Scsis = append(state.Scsis, &Disk{})
+			for i >= len(state.Scsis) {
+				state.Scsis = append(state.Scsis, nil)
+			}
+			if state.Scsis[i] == nil || state.Scsis[i].VolumeID.ValueString() != scsi.File {
+				state.Scsis[i] = &Disk{}
 			}
 			diags := state.Scsis[i].buildDisk(i, scsi.File, (*bool)(scsi.Snapshot))
 			resp.Diagnostics.Append(diags...)
@@ -513,20 +558,26 @@ func (r *resourceNodeVirtualMachine) Read(ctx context.Context, req resource.Read
 		}
 	}
 
+	if state.Networks == nil {
+		state.Networks = make([]*Network, 0)
+	}
 	if config.Nets != nil {
-		state.Networks = make([]*Network, len(*config.Nets))
 		for i, net := range *config.Nets {
-			n := &Network{}
+			for i >= len(state.Networks) {
+				state.Networks = append(state.Networks, nil)
+			}
+
+			if state.Networks[i] == nil {
+				state.Networks[i] = &Network{}
+			}
+			n := state.Networks[i]
 			if net.Firewall != nil {
 				n.Firewall = types.BoolValue(bool(*net.Firewall))
 			}
 			if net.Bridge != nil {
 				n.Bridge = types.StringValue(*net.Bridge)
 			}
-			state.Networks[i] = n
 		}
-	} else {
-		state.Networks = make([]*Network, 0)
 	}
 
 	diags = resp.State.Set(ctx, state)
@@ -539,13 +590,13 @@ func (r *resourceNodeVirtualMachine) Read(ctx context.Context, req resource.Read
 func (d *Disk) buildDisk(i int, file string, snapshot *bool) diag.Diagnostics {
 	diags := diag.Diagnostics{}
 	storageID := strings.Split(file, ":")[0]
-	snapshotBool := false
-	if snapshot != nil {
-		snapshotBool = *snapshot
-	}
 	d.Storage = types.StringValue(storageID)
-	d.Content = types.StringValue(file)
-	d.Readonly = types.BoolValue(snapshotBool)
+	d.VolumeID = types.StringValue(file)
+	if snapshot != nil {
+		if !d.Readonly.IsNull() || *snapshot {
+			d.Readonly = types.BoolValue(*snapshot)
+		}
+	}
 	return diags
 }
 
