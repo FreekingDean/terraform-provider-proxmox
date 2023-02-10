@@ -35,6 +35,7 @@ type Disk struct {
 	Content    types.String `tfsdk:"content"`
 	ImportFrom types.String `tfsdk:"import_from"`
 	Readonly   types.Bool   `tfsdk:"readonly"`
+	Backup     types.Bool   `tfsdk:"backup"`
 }
 
 type Network struct {
@@ -43,16 +44,18 @@ type Network struct {
 }
 
 type resourceNodeVirtualMachineModel struct {
-	ID       types.Int64    `tfsdk:"id"`
-	Reboot   types.Bool     `tfsdk:"reboot"`
-	FWConfig types.String   `tfsdk:"fw_config"`
-	Node     types.String   `tfsdk:"node"`
-	Ides     []*Disk        `tfsdk:"ide"`
-	Scsis    []*Disk        `tfsdk:"scsi"`
-	Networks []*Network     `tfsdk:"network"`
-	Memory   types.Int64    `tfsdk:"memory"`
-	CPUs     types.Int64    `tfsdk:"cpus"`
-	Serials  []types.String `tfsdk:"serials"`
+	ID         types.Int64    `tfsdk:"id"`
+	Name       types.String   `tfsdk:"name"`
+	Reboot     types.Bool     `tfsdk:"reboot"`
+	FWConfig   types.String   `tfsdk:"fw_config"`
+	GuestAgent types.Bool     `tfsdk:"guest_agent"`
+	Node       types.String   `tfsdk:"node"`
+	Ides       []*Disk        `tfsdk:"ide"`
+	Scsis      []*Disk        `tfsdk:"scsi"`
+	Networks   []*Network     `tfsdk:"network"`
+	Memory     types.Int64    `tfsdk:"memory"`
+	CPUs       types.Int64    `tfsdk:"cpus"`
+	Serials    []types.String `tfsdk:"serials"`
 }
 
 type resourceNodeVirtualMachine struct {
@@ -123,6 +126,10 @@ func (e *resourceNodeVirtualMachine) Schema(ctx context.Context, req resource.Sc
 						Optional:    true,
 						Description: "If set will put the disk in 'snapshot' mode making it readonly",
 					},
+					"backup": schema.BoolAttribute{
+						Optional:    true,
+						Description: "If the disk should be backed up during backup",
+					},
 				},
 			},
 		}
@@ -135,6 +142,10 @@ func (e *resourceNodeVirtualMachine) Schema(ctx context.Context, req resource.Sc
 				PlanModifiers: []planmodifier.Int64{
 					int64planmodifier.RequiresReplace(),
 				},
+			},
+			"name": schema.StringAttribute{
+				Optional:    true,
+				Description: "The name of the VM",
 			},
 			"memory": schema.Int64Attribute{
 				Required:    true,
@@ -166,6 +177,10 @@ func (e *resourceNodeVirtualMachine) Schema(ctx context.Context, req resource.Sc
 				ElementType: types.StringType,
 				Optional:    true,
 				Description: "A list (max 3) of serial devices on the guest",
+			},
+			"guest_agent": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Enables the guest agent on the VM",
 			},
 		},
 		Blocks: map[string]schema.Block{
@@ -204,6 +219,16 @@ func (r *resourceNodeVirtualMachine) Create(ctx context.Context, req resource.Cr
 
 		Memory: proxmox.Int(int(plan.Memory.ValueInt64())),
 		Cores:  proxmox.Int(int(plan.CPUs.ValueInt64())),
+	}
+
+	if !plan.GuestAgent.IsNull() {
+		creq.Agent = &qemu.Agent{
+			Enabled: *proxmox.PVEBool(plan.GuestAgent.ValueBool()),
+		}
+	}
+
+	if plan.Name.ValueString() != "" {
+		creq.Name = proxmox.String(plan.Name.ValueString())
 	}
 
 	serials := make([]*string, len(plan.Serials))
@@ -357,12 +382,28 @@ func (r *resourceNodeVirtualMachine) Update(ctx context.Context, req resource.Up
 		Vmid: int(plan.ID.ValueInt64()),
 	}
 
+	if plan.Name.ValueString() != "" {
+		configReq.Name = proxmox.String(plan.Name.ValueString())
+	}
+
 	if !plan.Memory.Equal(state.Memory) {
 		configReq.Memory = proxmox.Int(int(plan.Memory.ValueInt64()))
 	}
 
 	if !plan.CPUs.Equal(state.CPUs) {
 		configReq.Cores = proxmox.Int(int(plan.CPUs.ValueInt64()))
+	}
+
+	toDel := []string{}
+
+	if !plan.GuestAgent.Equal(state.GuestAgent) {
+		if plan.GuestAgent.IsNull() {
+			toDel = append(toDel, "agent")
+		} else {
+			configReq.Agent = &qemu.Agent{
+				Enabled: *proxmox.PVEBool(plan.GuestAgent.ValueBool()),
+			}
+		}
 	}
 
 	if !plan.FWConfig.Equal(state.FWConfig) {
@@ -372,8 +413,6 @@ func (r *resourceNodeVirtualMachine) Update(ctx context.Context, req resource.Up
 		}
 		configReq.Args = &cfgString
 	}
-
-	toDel := []string{}
 
 	if len(plan.Networks) > 0 {
 		nets := make(qemu.Nets, 0)
@@ -397,7 +436,7 @@ func (r *resourceNodeVirtualMachine) Update(ctx context.Context, req resource.Up
 	if len(plan.Ides) > 0 {
 		ideArr := make(qemu.Ides, 0)
 		for i, d := range plan.Ides {
-			if len(state.Ides) < i ||
+			if len(state.Ides) <= i ||
 				!state.Ides[i].Equal(plan.Ides[i]) {
 				ide := &qemu.Ide{}
 				proxmoxDisk(d, (*wrappedIde)(ide))
@@ -413,7 +452,7 @@ func (r *resourceNodeVirtualMachine) Update(ctx context.Context, req resource.Up
 	if len(plan.Scsis) > 0 {
 		scsiArr := make(qemu.Scsis, 0)
 		for i, d := range plan.Scsis {
-			if len(state.Scsis) < i ||
+			if len(state.Scsis) <= i ||
 				!state.Scsis[i].Equal(plan.Scsis[i]) {
 				scsi := &qemu.Scsi{}
 				proxmoxDisk(d, (*wrappedScsi)(scsi))
@@ -465,6 +504,39 @@ func (r *resourceNodeVirtualMachine) Update(ctx context.Context, req resource.Up
 			return
 		}
 	}
+	config, err := r.q.VmConfig(ctx, qemu.VmConfigRequest{
+		Node: plan.Node.ValueString(),
+		Vmid: int(plan.ID.ValueInt64()),
+	})
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error gettng  VM config",
+			"An unexpected error occurred when retreiving the VM config. "+
+				"Proxmox API Error: "+err.Error(),
+		)
+		return
+	}
+	for i, d := range plan.Scsis {
+		if config.Scsis == nil || len(*config.Scsis) <= i {
+			resp.Diagnostics.AddError(
+				"Not enough disks",
+				"Something went wrong creating the VM not enough scsi Disks",
+			)
+			return
+		}
+		d.VolumeID = types.StringValue((*config.Scsis)[i].File)
+	}
+	for i, d := range plan.Ides {
+		if config.Ides == nil || len(*config.Ides) <= i {
+			resp.Diagnostics.AddError(
+				"Not enough disks",
+				"Something went wrong creating the VM not enough ide Disks",
+			)
+			return
+		}
+		d.VolumeID = types.StringValue((*config.Ides)[i].File)
+	}
+
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -473,12 +545,19 @@ func (r *resourceNodeVirtualMachine) Update(ctx context.Context, req resource.Up
 }
 
 func (d *Disk) Equal(other *Disk) bool {
+	if other == nil && d == nil {
+		return true
+	}
+	if other == nil || d == nil {
+		return false
+	}
 	return d.VolumeID.Equal(other.VolumeID) &&
 		d.ImportFrom.Equal(other.ImportFrom) &&
 		d.Storage.Equal(other.Storage) &&
 		d.SizeGB.Equal(other.SizeGB) &&
 		d.Content.Equal(other.Content) &&
-		d.Readonly.Equal(other.Readonly)
+		d.Readonly.Equal(other.Readonly) &&
+		d.Backup.Equal(other.Backup)
 }
 
 func (r *resourceNodeVirtualMachine) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -514,48 +593,60 @@ func (r *resourceNodeVirtualMachine) Read(ctx context.Context, req resource.Read
 
 	state.Memory = types.Int64Value(int64(*config.Memory))
 	state.CPUs = types.Int64Value(int64(*config.Cores))
+	if config.Agent != nil {
+		state.GuestAgent = types.BoolValue(bool(config.Agent.Enabled))
+	} else {
+		state.GuestAgent = types.BoolNull()
+	}
 
 	if config.Args != nil {
-		if strings.HasPrefix(*config.Args, "-fw_cfg") {
-			state.FWConfig = types.StringValue(strings.TrimPrefix(*config.Args, "-fw_cfg"))
+		if strings.HasPrefix(*config.Args, "-fw_cfg ") {
+			state.FWConfig = types.StringValue(strings.TrimPrefix(*config.Args, "-fw_cfg "))
 		}
 	}
 
-	if state.Ides == nil {
+	if config.Ides != nil {
+		newState := make([]*Disk, len(*config.Ides))
+		for i, ide := range *config.Ides {
+			if ide == nil {
+				continue
+			}
+			if len(state.Ides) <= i || state.Ides[i] == nil || state.Ides[i].VolumeID.ValueString() != ide.File {
+				newState[i] = &Disk{}
+			} else {
+				newState[i] = state.Ides[i]
+			}
+			diags := newState[i].buildDisk(i, ide.File, (*bool)(ide.Snapshot), (*bool)(ide.Backup))
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+		}
+		state.Ides = newState
+	} else {
 		state.Ides = make([]*Disk, 0)
 	}
-	if config.Ides != nil {
-		for i, ide := range *config.Ides {
-			for i >= len(state.Ides) {
-				state.Ides = append(state.Ides, nil)
-			}
-			if state.Ides[i] == nil || state.Ides[i].VolumeID.ValueString() != ide.File {
-				state.Ides[i] = &Disk{}
-			}
-			diags := state.Ides[i].buildDisk(i, ide.File, (*bool)(ide.Snapshot))
-			resp.Diagnostics.Append(diags...)
-			if resp.Diagnostics.HasError() {
-				return
-			}
-		}
-	}
-	if state.Scsis == nil {
-		state.Scsis = make([]*Disk, 0)
-	}
+
 	if config.Scsis != nil {
+		newState := make([]*Disk, len(*config.Scsis))
 		for i, scsi := range *config.Scsis {
-			for i >= len(state.Scsis) {
-				state.Scsis = append(state.Scsis, nil)
+			if scsi == nil {
+				continue
 			}
-			if state.Scsis[i] == nil || state.Scsis[i].VolumeID.ValueString() != scsi.File {
-				state.Scsis[i] = &Disk{}
+			if len(state.Scsis) <= i || state.Scsis[i] == nil || state.Scsis[i].VolumeID.ValueString() != scsi.File {
+				newState[i] = &Disk{}
+			} else {
+				newState[i] = state.Scsis[i]
 			}
-			diags := state.Scsis[i].buildDisk(i, scsi.File, (*bool)(scsi.Snapshot))
+			diags := newState[i].buildDisk(i, scsi.File, (*bool)(scsi.Snapshot), (*bool)(scsi.Backup))
 			resp.Diagnostics.Append(diags...)
 			if resp.Diagnostics.HasError() {
 				return
 			}
 		}
+		state.Scsis = newState
+	} else {
+		state.Scsis = make([]*Disk, 0)
 	}
 
 	if state.Networks == nil {
@@ -587,14 +678,22 @@ func (r *resourceNodeVirtualMachine) Read(ctx context.Context, req resource.Read
 	}
 }
 
-func (d *Disk) buildDisk(i int, file string, snapshot *bool) diag.Diagnostics {
+func (d *Disk) buildDisk(i int, file string, snapshot *bool, backup *bool) diag.Diagnostics {
 	diags := diag.Diagnostics{}
 	storageID := strings.Split(file, ":")[0]
-	d.Storage = types.StringValue(storageID)
+	if !strings.HasPrefix(file, "/dev") {
+		d.Storage = types.StringValue(storageID)
+	}
 	d.VolumeID = types.StringValue(file)
 	if snapshot != nil {
 		if !d.Readonly.IsNull() || *snapshot {
 			d.Readonly = types.BoolValue(*snapshot)
+		}
+	}
+
+	if backup != nil {
+		if !d.Backup.IsNull() || *backup {
+			d.Backup = types.BoolValue(*backup)
 		}
 	}
 	return diags
@@ -615,4 +714,5 @@ func proxmoxDisk(d *Disk, qd wrappedDisk) {
 	}
 
 	qd.SetSnapshot(d.Readonly.ValueBool())
+	qd.SetBackup(d.Backup.ValueBool())
 }

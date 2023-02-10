@@ -52,6 +52,10 @@ func (w *wrappedScsi) SetSnapshot(m bool) {
 	w.Snapshot = proxmox.PVEBool(m)
 }
 
+func (w *wrappedScsi) SetBackup(m bool) {
+	w.Backup = proxmox.PVEBool(m)
+}
+
 type wrappedIde qemu.Ide
 
 func (w *wrappedIde) GetFile() string {
@@ -99,6 +103,10 @@ func (w *wrappedIde) SetSnapshot(m bool) {
 	w.Snapshot = proxmox.PVEBool(m)
 }
 
+func (w *wrappedIde) SetBackup(m bool) {
+	w.Backup = proxmox.PVEBool(m)
+}
+
 type wrappedDisk interface {
 	GetFile() string
 	SetFile(string)
@@ -109,4 +117,5 @@ type wrappedDisk interface {
 	SetImportFrom(string)
 	GetSnapshot() bool
 	SetSnapshot(bool)
+	SetBackup(bool)
 }

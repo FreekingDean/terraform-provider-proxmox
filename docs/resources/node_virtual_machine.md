@@ -54,7 +54,9 @@ resource "proxmox_node_virtual_machine" "ubuntu" {
 ### Optional
 
 - `fw_config` (String) Additional arguments to pass to qemu
+- `guest_agent` (Boolean) Enables the guest agent on the VM
 - `ide` (Block List) A ide disk object (see [below for nested schema](#nestedblock--ide))
+- `name` (String) The name of the VM
 - `network` (Block List) A network interface (see [below for nested schema](#nestedblock--network))
 - `reboot` (Boolean) Reboot on config change
 - `scsi` (Block List) A scsi disk object (see [below for nested schema](#nestedblock--scsi))
@@ -65,6 +67,7 @@ resource "proxmox_node_virtual_machine" "ubuntu" {
 
 Optional:
 
+- `backup` (Boolean) If the disk should be backed up during backup
 - `content` (String) The content ID for this disk
 - `import_from` (String) A volid of an existing disk to copy from
 - `readonly` (Boolean) If set will put the disk in 'snapshot' mode making it readonly
@@ -90,6 +93,7 @@ Required:
 
 Optional:
 
+- `backup` (Boolean) If the disk should be backed up during backup
 - `content` (String) The content ID for this disk
 - `import_from` (String) A volid of an existing disk to copy from
 - `readonly` (Boolean) If set will put the disk in 'snapshot' mode making it readonly
