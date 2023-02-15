@@ -593,11 +593,6 @@ func (r *resourceNodeVirtualMachine) Read(ctx context.Context, req resource.Read
 
 	state.Memory = types.Int64Value(int64(*config.Memory))
 	state.CPUs = types.Int64Value(int64(*config.Cores))
-	if config.Agent != nil {
-		state.GuestAgent = types.BoolValue(bool(config.Agent.Enabled))
-	} else {
-		state.GuestAgent = types.BoolNull()
-	}
 
 	if config.Args != nil {
 		if strings.HasPrefix(*config.Args, "-fw_cfg ") {
