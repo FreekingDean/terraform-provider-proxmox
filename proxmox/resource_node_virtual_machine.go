@@ -434,13 +434,13 @@ func (r *resourceNodeVirtualMachine) Update(ctx context.Context, req resource.Up
 	}
 
 	if len(plan.Ides) > 0 {
-		ideArr := make(qemu.Ides, 0)
+		ideArr := make(qemu.Ides, len(plan.Ides))
 		for i, d := range plan.Ides {
 			if len(state.Ides) <= i ||
 				!state.Ides[i].Equal(plan.Ides[i]) {
 				ide := &qemu.Ide{}
 				proxmoxDisk(d, (*wrappedIde)(ide))
-				ideArr = append(ideArr, ide)
+				ideArr[i] = ide
 			}
 		}
 		configReq.Ides = &ideArr
@@ -450,13 +450,13 @@ func (r *resourceNodeVirtualMachine) Update(ctx context.Context, req resource.Up
 	}
 
 	if len(plan.Scsis) > 0 {
-		scsiArr := make(qemu.Scsis, 0)
+		scsiArr := make(qemu.Scsis, len(plan.Scsis))
 		for i, d := range plan.Scsis {
 			if len(state.Scsis) <= i ||
 				!state.Scsis[i].Equal(plan.Scsis[i]) {
 				scsi := &qemu.Scsi{}
 				proxmoxDisk(d, (*wrappedScsi)(scsi))
-				scsiArr = append(scsiArr, scsi)
+				scsiArr[i] = scsi
 			}
 		}
 		configReq.Scsis = &scsiArr
