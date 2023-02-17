@@ -158,6 +158,7 @@ func (p *proxmoxProvider) Resources(_ context.Context) []func() resource.Resourc
 	return []func() resource.Resource{
 		p.resourceFunc(&resourceNodeStorageContent{}),
 		p.resourceFunc(&resourceNodeVirtualMachine{}),
+		p.resourceFunc(&resourceClusterHAResource{}),
 	}
 }
 

@@ -32,7 +32,7 @@ func (r *resourceClusterHAResource) SetClient(p *proxmox.Client) {
 }
 
 func (r *resourceClusterHAResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_cluster_ha_resources"
+	resp.TypeName = req.ProviderTypeName + "_cluster_ha_resource"
 }
 
 func (e *resourceClusterHAResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
