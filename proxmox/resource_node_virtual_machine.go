@@ -479,11 +479,7 @@ func (r *resourceNodeVirtualMachine) Update(ctx context.Context, req resource.Up
 		return
 	}
 
-	diags = r.t.Wait(ctx, task, plan.Node.ValueString())
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
+	_ = r.t.Wait(ctx, task, plan.Node.ValueString())
 	if plan.Reboot.ValueBool() {
 		task, err = r.c.VmReboot(ctx, status.VmRebootRequest{
 			Node:    plan.Node.ValueString(),
