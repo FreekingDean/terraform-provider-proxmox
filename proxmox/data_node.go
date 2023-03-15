@@ -72,7 +72,7 @@ func (d *dataNode) Read(ctx context.Context, req datasource.ReadRequest, resp *d
 			if tStr, ok := t.(string); ok {
 				if tStr == "bridge" {
 					if ip, ok := net["address"]; ok {
-						if ipStr, ok := ip.(string); ok {
+						if ipStr, ok := ip.(string); ok && ipStr != "" {
 							state.IPAddress = types.StringValue(ipStr)
 						}
 					}
