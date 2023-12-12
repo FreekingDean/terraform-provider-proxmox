@@ -2,6 +2,8 @@ package proxmox
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -197,6 +199,10 @@ func (r *resourceClusterHAResource) ImportState(ctx context.Context, req resourc
 	res, err := r.r.Find(ctx, resources.FindRequest{
 		Sid: req.ID,
 	})
+	if strings.Contains(err.Error(), fmt.Sprintf("no such resource '%s'", req.ID)) {
+		resp.State.RemoveResource(ctx)
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error reading HA resource",
